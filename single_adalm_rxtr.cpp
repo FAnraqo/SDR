@@ -70,6 +70,7 @@ struct stream_cfg {
 	long long fs_hz; // Baseband sample rate in Hz
 	long long lo_hz; // Local oscillator frequency in Hz
 	const char* rfport; // Port name
+    const char* rx_gain_mode;
 };
 
 int main(){
@@ -83,20 +84,21 @@ int main(){
 	struct stream_cfg txcfg;
 
     // RX stream config
-	rxcfg.bw_hz = MHZ(10);   // 2 MHz rf bandwidth
-	rxcfg.fs_hz = MHZ(10);   // 2.5 MS/s rx sample rate
-	rxcfg.lo_hz = MHZ(1000); // 2.5 GHz rf frequency
+	rxcfg.bw_hz = MHZ(2);   // 2 MHz rf bandwidth
+	rxcfg.fs_hz = MHZ(2.5);   // 2.5 MS/s rx sample rate
+	rxcfg.lo_hz = GHZ(2.5); // 2.5 GHz rf frequency
 	rxcfg.rfport = "A_BALANCED"; // port A (select for rf freq.)
+    rxcfg.rx_gain_mode = "slow_attack";
 
 	// TX stream config
-	txcfg.bw_hz = MHZ(10); // 1 MHz rf bandwidth
-	txcfg.fs_hz = MHZ(10);   // 2.5 MS/s tx sample rate
-	txcfg.lo_hz = MHZ(1000); // 2.5 GHz rf frequency
+	txcfg.bw_hz = MHZ(2); // 1 MHz rf bandwidth
+	txcfg.fs_hz = MHZ(2.5);   // 2.5 MS/s tx sample rate
+	txcfg.lo_hz = GHZ(2.5); // 2.5 GHz rf frequency
 	txcfg.rfport = "A"; // port A (select for rf freq.)
 
 
     // Initialize IIO context
-    ctx = iio_create_context(NULL, "ip:192.168.3.1");
+    ctx = iio_create_context(NULL, "ip:192.168.5.1");
     if(!ctx){
         std::cerr << "Unable to create IIO context addr: " << "ip:192.168.2.1" << std::endl;
         return 1;
@@ -128,6 +130,7 @@ int main(){
     iio_attr_write_longlong(tx_bw_attr, txcfg.bw_hz);
     const struct iio_attr *tx_fs_attr = iio_channel_find_attr(tx_chn, "sampling_frequency");
     iio_attr_write_longlong(tx_fs_attr, txcfg.fs_hz);
+    
     printf("* Настройка частоты опорного генератора (lo, local oscilator)  %s \n", "TX");
     struct iio_channel *tx_lo_chn = NULL;
     tx_lo_chn = iio_device_find_channel(phy_dev, "altvoltage1", true);
@@ -146,12 +149,14 @@ int main(){
     const struct iio_attr *rx_fs_attr = iio_channel_find_attr(rx_chn, "sampling_frequency");
     iio_attr_write_longlong(rx_fs_attr, rxcfg.fs_hz);
     printf("* Настройка частоты опорного генератора (lo, local oscilator)  %s \n", "RX");
+    
     struct iio_channel *rx_lo_chn = NULL;
     rx_lo_chn = iio_device_find_channel(phy_dev, "altvoltage0", true);
     const struct iio_attr *rx_lo_attr = iio_channel_find_attr(rx_lo_chn, "frequency");
     iio_attr_write_longlong(rx_lo_attr, rxcfg.lo_hz);
+    
     const struct iio_attr *rx_gain_attr = iio_channel_find_attr(rx_chn, "gain_control_mode");
-    iio_attr_write_string(rx_gain_attr, "slow_attack");
+    iio_attr_write_string(rx_gain_attr, rxcfg.rx_gain_mode);
 
     printf("* Инициализация потоков I/Q %s канала AD9361 \n", "TX");
     tx0_i = iio_device_find_channel(tx_dev, "voltage0", true);
@@ -193,13 +198,14 @@ int main(){
 
     const struct iio_block *txblock, *rxblock;
 
-    std::ofstream out;
-    out.open("buffer_out.txt");
-
-    int32_t i = 0;
+    
+    int32_t counter = 0;
     int32_t index = 0;
-    while (1)
+    int16_t buffer_tmp[1000000][2] = {0};
+    int32_t tmp = 0;
+    while (counter < 100)
     {
+        
         int16_t *p_dat, *p_end;
 		ptrdiff_t p_inc;
         uint32_t samples_cnt = 0;
@@ -220,14 +226,17 @@ int main(){
 
         p_inc = tx_sample_sz;
         p_end = static_cast<int16_t *>(iio_block_end(txblock));
-        int counter_i = 0;
+        //int counter_i = 0;
         for (p_dat = static_cast<int16_t *>(iio_block_first(txblock, tx0_i)); p_dat < p_end;
             p_dat += p_inc / sizeof(*p_dat))
         {
-            p_dat[0] = x_bb_real[index];
-            p_dat[1] = x_bb_imag[index];
+            if (index < 1280){
+                p_dat[0] = x_bb_real[index];
+                p_dat[1] = x_bb_imag[index];
+            }
+            
             index ++;
-            if (index % 127 == 0)
+            if (index == 100000)
                 index = 0;
             
         }
@@ -241,27 +250,27 @@ int main(){
 			/* Example: swap I and Q */
 			int16_t i = p_dat[0];
 			int16_t q = p_dat[1];
+
+            buffer_tmp[tmp][0] = i;
+            buffer_tmp[tmp][1] = q;
+            tmp ++;
+           
             samples_cnt++;
-            i++;
-
-            if (out.is_open())
-            {
-                out << i << ' ' << q << std::endl;
-                index ++;
-            }
-
-            if (index % 127 == 0)
-            {
-                index = 0;
-                out.close();
-            }
-                
 
         }
         printf("RX samples_cnt = %d\n", samples_cnt);
-        printf("i = %d\n", i);
-
+        printf("i = %d\n", counter);
+        counter++;
     }
+
+    std::ofstream out;
+    out.open("buffer_out.txt");
+
+    if (out.is_open()) 
+        for (int i = 0; i < tmp; i++)
+            out << buffer_tmp[i][0] << ',' << buffer_tmp[i][1] << std::endl;
+            
+    out.close();
     shutdown();
 
     return 0;

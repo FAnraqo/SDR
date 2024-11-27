@@ -35,9 +35,12 @@ b = np.ones(int(ns))
 x=np.reshape(m,(2,128))
 xi=x[0,:]
 xq=x[1,:]
-x_bb=((xi+1j*xq)/np.sqrt(2) * 2**10)
+x_bb=((xi+1j*xq)/np.sqrt(2) * 2**8)
+
+x_cc = np.repeat(x_bb, 10)
+
 plt.figure(1)
-plt.scatter(x_bb.real,x_bb.imag)
+plt.scatter(x_cc.real,x_cc.imag)
  
 plt.show()
 
@@ -50,11 +53,11 @@ with open('buffer.h', 'w') as file:
     file.write("#define MYFILE_H\n\n")
     
     file.write("const double x_bb_real[] = {")
-    file.write(', '.join(map(str, x_bb.real)))
+    file.write(', '.join(map(str, x_cc.real)))
     file.write("};\n")
     
     file.write("const double x_bb_imag[] = {")
-    file.write(', '.join(map(str, x_bb.imag)))
+    file.write(', '.join(map(str, x_cc.imag)))
     file.write("};\n\n")
     
     file.write("#endif // MYFILE_H\n")
